@@ -1,7 +1,6 @@
 package cache_redis
 
 import (
-	"encoding/json"
 	"errors"
 	"sync"
 	"time"
@@ -216,9 +215,8 @@ func (connect *redisCacheConnect) Read(key string) (Any, error) {
 
 	realVal := redisCacheValue{}
 
-	//待优化，统一JSON解析
-	// err = chef.JsonDecode(val, &realVal)
-	err = json.Unmarshal(val, &realVal)
+	//统一JSON解析
+	err = chef.UnmarshalJSON(val, &realVal)
 	if err != nil {
 		return nil, err
 	}
@@ -238,8 +236,7 @@ func (connect *redisCacheConnect) Write(key string, val Any, expiry time.Duratio
 	realVal := redisCacheValue{val}
 
 	//待优化，统一JSON解析
-	// bytes, err := chef.JsonEncode(realVal)
-	bytes, err := json.Marshal(key)
+	bytes, err := chef.MarshalJSON(realVal)
 	if err != nil {
 		return err
 	}
