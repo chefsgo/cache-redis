@@ -6,31 +6,33 @@ import (
 	"time"
 
 	. "github.com/chefsgo/base"
-	"github.com/chefsgo/chef"
+	"github.com/chefsgo/cache"
+	"github.com/chefsgo/codec"
+	"github.com/chefsgo/log"
 	"github.com/chefsgo/util"
 
 	"github.com/gomodule/redigo/redis"
 )
 
-//-------------------- redisCacheBase begin -------------------------
+//-------------------- redisBase begin -------------------------
 
 var (
 	errInvalidCacheConnection = errors.New("Invalid cache connection.")
 )
 
 type (
-	redisCacheDriver  struct{}
-	redisCacheConnect struct {
+	redisDriver  struct{}
+	redisConnect struct {
 		mutex   sync.RWMutex
 		actives int64
 
 		name    string
-		config  chef.CacheConfig
-		setting redisCacheSetting
+		config  cache.Config
+		setting redisSetting
 
 		client *redis.Pool
 	}
-	redisCacheSetting struct {
+	redisSetting struct {
 		Server   string //服务器地址，ip:端口
 		Password string //服务器auth密码
 		Database string //数据库
@@ -41,14 +43,14 @@ type (
 		Timeout time.Duration
 	}
 
-	redisCacheValue struct {
+	redisValue struct {
 		Value Any `json:"value"`
 	}
 )
 
 //连接
-func (driver *redisCacheDriver) Connect(name string, config chef.CacheConfig) (chef.CacheConnect, error) {
-	setting := redisCacheSetting{
+func (driver *redisDriver) Connect(name string, config cache.Config) (cache.Connect, error) {
+	setting := redisSetting{
 		Server: "127.0.0.1:6379", Password: "", Database: "",
 		Idle: 30, Active: 100, Timeout: 240,
 	}
@@ -81,19 +83,19 @@ func (driver *redisCacheDriver) Connect(name string, config chef.CacheConfig) (c
 		}
 	}
 
-	return &redisCacheConnect{
+	return &redisConnect{
 		name: name, config: config, setting: setting,
 	}, nil
 }
 
 //打开连接
-func (connect *redisCacheConnect) Open() error {
+func (connect *redisConnect) Open() error {
 	connect.client = &redis.Pool{
 		MaxIdle: connect.setting.Idle, MaxActive: connect.setting.Active, IdleTimeout: connect.setting.Timeout,
 		Dial: func() (redis.Conn, error) {
 			c, err := redis.Dial("tcp", connect.setting.Server)
 			if err != nil {
-				chef.Warning("session.redis.dial", err)
+				log.Warning("session.redis.dial", err)
 				return nil, err
 			}
 
@@ -101,7 +103,7 @@ func (connect *redisCacheConnect) Open() error {
 			if connect.setting.Password != "" {
 				if _, err := c.Do("AUTH", connect.setting.Password); err != nil {
 					c.Close()
-					chef.Warning("session.redis.auth", err)
+					log.Warning("session.redis.auth", err)
 					return nil, err
 				}
 			}
@@ -109,7 +111,7 @@ func (connect *redisCacheConnect) Open() error {
 			if connect.setting.Database != "" {
 				if _, err := c.Do("SELECT", connect.setting.Database); err != nil {
 					c.Close()
-					chef.Warning("session.redis.select", err)
+					log.Warning("session.redis.select", err)
 					return nil, err
 				}
 			}
@@ -135,7 +137,7 @@ func (connect *redisCacheConnect) Open() error {
 }
 
 //关闭连接
-func (connect *redisCacheConnect) Close() error {
+func (connect *redisConnect) Close() error {
 	if connect.client != nil {
 		if err := connect.client.Close(); err != nil {
 			return err
@@ -144,7 +146,7 @@ func (connect *redisCacheConnect) Close() error {
 	return nil
 }
 
-func (connect *redisCacheConnect) Serial(key string, start, step int64) (int64, error) {
+func (connect *redisConnect) Serial(key string, start, step int64) (int64, error) {
 	//加并发锁，忘记之前为什么加了，应该是有问题加了才正常的
 	// connect.mutex.Lock()
 	// defer connect.mutex.Unlock()
@@ -176,7 +178,7 @@ func (connect *redisCacheConnect) Serial(key string, start, step int64) (int64, 
 }
 
 //查询缓存，
-func (connect *redisCacheConnect) Exists(key string) (bool, error) {
+func (connect *redisConnect) Exists(key string) (bool, error) {
 	if connect.client == nil {
 		return false, errInvalidCacheConnection
 	}
@@ -197,7 +199,7 @@ func (connect *redisCacheConnect) Exists(key string) (bool, error) {
 }
 
 //查询缓存，
-func (connect *redisCacheConnect) Read(key string) (Any, error) {
+func (connect *redisConnect) Read(key string) (Any, error) {
 	if connect.client == nil {
 		return nil, errInvalidCacheConnection
 	}
@@ -213,10 +215,9 @@ func (connect *redisCacheConnect) Read(key string) (Any, error) {
 		return nil, nil
 	}
 
-	realVal := redisCacheValue{}
+	realVal := redisValue{}
 
-	//统一JSON解析
-	err = chef.UnmarshalJSON(val, &realVal)
+	err = codec.UnmarshalJSON(val, &realVal)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +226,7 @@ func (connect *redisCacheConnect) Read(key string) (Any, error) {
 }
 
 //更新缓存
-func (connect *redisCacheConnect) Write(key string, val Any, expiry time.Duration) error {
+func (connect *redisConnect) Write(key string, val Any, expiry time.Duration) error {
 	if connect.client == nil {
 		return errInvalidCacheConnection
 	}
@@ -233,16 +234,15 @@ func (connect *redisCacheConnect) Write(key string, val Any, expiry time.Duratio
 	conn := connect.client.Get()
 	defer conn.Close()
 
-	realVal := redisCacheValue{val}
+	realVal := redisValue{val}
 
-	//待优化，统一JSON解析
-	bytes, err := chef.MarshalJSON(realVal)
+	bytes, err := codec.MarshalJSON(realVal)
 	if err != nil {
 		return err
 	}
 
 	args := []Any{
-		realKey, string(bytes),
+		key, string(bytes),
 	}
 	if expiry > 0 {
 		args = append(args, "EX", expiry.Seconds())
@@ -257,7 +257,7 @@ func (connect *redisCacheConnect) Write(key string, val Any, expiry time.Duratio
 }
 
 //删除缓存
-func (connect *redisCacheConnect) Delete(key string) error {
+func (connect *redisConnect) Delete(key string) error {
 	if connect.client == nil {
 		return errInvalidCacheConnection
 	}
@@ -274,7 +274,7 @@ func (connect *redisCacheConnect) Delete(key string) error {
 	return nil
 }
 
-func (connect *redisCacheConnect) Clear(prefix string) error {
+func (connect *redisConnect) Clear(prefix string) error {
 	if connect.client == nil {
 		return errInvalidCacheConnection
 	}
@@ -282,7 +282,7 @@ func (connect *redisCacheConnect) Clear(prefix string) error {
 	conn := connect.client.Get()
 	defer conn.Close()
 
-	keys, err := connect.Keys(prefixs...)
+	keys, err := connect.Keys(prefix)
 	if err != nil {
 		return err
 	}
@@ -296,9 +296,9 @@ func (connect *redisCacheConnect) Clear(prefix string) error {
 
 	return nil
 }
-func (connect *redisCacheConnect) Keys(prefix string) ([]string, error) {
+func (connect *redisConnect) Keys(prefix string) ([]string, error) {
 	if connect.client == nil {
-		return errInvalidCacheConnection
+		return nil, errInvalidCacheConnection
 	}
 
 	conn := connect.client.Get()
@@ -314,4 +314,4 @@ func (connect *redisCacheConnect) Keys(prefix string) ([]string, error) {
 	return keys, nil
 }
 
-//-------------------- redisCacheBase end -------------------------
+//-------------------- redisBase end -------------------------

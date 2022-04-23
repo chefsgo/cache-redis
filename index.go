@@ -1,13 +1,13 @@
 package cache_redis
 
 import (
-	"github.com/chefsgo/chef"
+	"github.com/chefsgo/cache"
 )
 
-func Driver() chef.CacheDriver {
-	return &redisCacheDriver{}
+func Driver() cache.Driver {
+	return &redisDriver{}
 }
 
 func init() {
-	chef.Register("redis", Driver())
+	cache.Register("redis", Driver())
 }
