@@ -7,7 +7,7 @@ import (
 
 	. "github.com/chefsgo/base"
 	"github.com/chefsgo/cache"
-	"github.com/chefsgo/codec"
+	"github.com/chefsgo/chef"
 	"github.com/chefsgo/log"
 	"github.com/chefsgo/util"
 
@@ -217,7 +217,7 @@ func (connect *redisConnect) Read(key string) (Any, error) {
 
 	realVal := redisValue{}
 
-	err = codec.UnmarshalJSON(val, &realVal)
+	err = chef.UnmarshalJSON(val, &realVal)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +236,7 @@ func (connect *redisConnect) Write(key string, val Any, expiry time.Duration) er
 
 	realVal := redisValue{val}
 
-	bytes, err := codec.MarshalJSON(realVal)
+	bytes, err := chef.MarshalJSON(realVal)
 	if err != nil {
 		return err
 	}
